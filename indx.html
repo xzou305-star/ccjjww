@@ -1,0 +1,565 @@
+<!DOCTYPE html><html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>智慧步态分析系统 v3.0 | 实时步态异常检测与跌倒预警</title>
+    <!-- 引入Google Fonts和Font Awesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Chart.js 轻量图表 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- MediaPipe Tasks Vision 核心库 -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0b0f17;
+            color: #e6edf3;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* 头部 */
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .header h1 {
+            font-size: 1.9rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #58a6ff, #ff7b72);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            letter-spacing: -0.5px;
+        }
+        .header p {
+            color: #8b949e;
+            margin-top: 6px;
+            font-size: 0.9rem;
+        }
+
+        /* 主网格布局 */
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 360px;
+            gap: 20px;
+            margin-bottom: 28px;
+        }
+
+        /* 视频区域 */
+        .video-panel {
+            background: #161b22;
+            border-radius: 24px;
+            overflow: hidden;
+            border: 1px solid #30363d;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+            position: relative;
+        }
+        .video-container {
+            position: relative;
+            width: 100%;
+            background: #000;
+            aspect-ratio: 4 / 3;
+        }
+        #videoElement {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        #outputCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .video-controls {
+            padding: 12px 16px;
+            display: flex;
+            gap: 12px;
+            background: #0d1117;
+            border-top: 1px solid #30363d;
+        }
+        .btn {
+            background: #21262d;
+            border: none;
+            color: #c9d1d9;
+            padding: 8px 16px;
+            border-radius: 40px;
+            font-weight: 500;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-primary {
+            background: #238636;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #2ea043;
+        }
+        .btn-warning {
+            background: #da3633;
+            color: white;
+        }
+        .btn-warning:hover {
+            background: #f85149;
+        }
+        .btn-outline {
+            border: 1px solid #3fb950;
+            background: transparent;
+            color: #3fb950;
+        }
+        .btn-outline:hover {
+            background: #1f3a2a;
+        }
+        .risk-badge {
+            margin-left: auto;
+            background: #0d1117;
+            padding: 5px 14px;
+            border-radius: 40px;
+            font-weight: bold;
+            font-size: 0.8rem;
+            border-left: 3px solid;
+        }
+
+        /* 右侧信息面板 */
+        .info-panel {
+            background: #161b22;
+            border-radius: 24px;
+            border: 1px solid #30363d;
+            padding: 18px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .risk-section {
+            background: #0d1117;
+            border-radius: 20px;
+            padding: 14px;
+            text-align: center;
+        }
+        .risk-level {
+            font-size: 1.5rem;
+            font-weight: 800;
+            margin-top: 6px;
+        }
+        .abnormal-list {
+            max-height: 380px;
+            overflow-y: auto;
+        }
+        .abnormal-item {
+            margin-bottom: 12px;
+        }
+        .abnormal-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            margin-bottom: 4px;
+        }
+        .progress-bar {
+            background: #21262d;
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.2s;
+        }
+        .fall-warning {
+            background: #2d1a1a;
+            border-left: 6px solid #da3633;
+            padding: 12px;
+            border-radius: 16px;
+            margin-top: 8px;
+        }
+
+        /* 伯格量表区域 & 报告 */
+        .berg-section, .report-section {
+            background: #161b22;
+            border-radius: 24px;
+            border: 1px solid #30363d;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .berg-item {
+            margin-bottom: 14px;
+        }
+        .berg-item label {
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        select {
+            background: #0d1117;
+            color: #e6edf3;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 6px 12px;
+            margin-left: 12px;
+            font-size: 0.8rem;
+        }
+        .report-text {
+            background: #0d1117;
+            border-radius: 18px;
+            padding: 16px;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            margin-top: 12px;
+            max-height: 280px;
+            overflow-y: auto;
+        }
+        hr {
+            border-color: #30363d;
+            margin: 12px 0;
+        }
+        i {
+            margin-right: 6px;
+        }
+        .status-led {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 10px;
+            background: #3fb950;
+            box-shadow: 0 0 4px #3fb950;
+            margin-right: 6px;
+        }
+        footer {
+            text-align: center;
+            font-size: 0.7rem;
+            color: #6e7681;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1><i class="fas fa-person-walking"></i> 智慧步态分析系统 v3.0</h1>
+        <p>实时骨骼追踪 · 15种步态异常识别 · 跌倒风险预警 · 伯格平衡评估</p>
+    </div>
+
+    <div class="dashboard">
+        <!-- 左侧视频区域 -->
+        <div class="video-panel">
+            <div class="video-container">
+                <video id="videoElement" autoplay playsinline></video>
+                <canvas id="outputCanvas"></canvas>
+            </div>
+            <div class="video-controls">
+                <button class="btn" id="startCamBtn"><i class="fas fa-camera"></i> 启动摄像头</button>
+                <button class="btn" id="stopCamBtn"><i class="fas fa-stop"></i> 停止</button>
+                <button class="btn btn-outline" id="genReportBtn"><i class="fas fa-file-alt"></i> 生成诊断报告</button>
+                <div class="risk-badge" id="fallRiskBadge">⚡ 风险评估中</div>
+            </div>
+        </div>
+
+        <!-- 右侧实时异常监测面板 -->
+        <div class="info-panel">
+            <div class="risk-section">
+                <i class="fas fa-triangle-exclamation"></i> 跌倒风险实时预警
+                <div class="risk-level" id="fallRiskLevel">--</div>
+                <div id="fallRiskDetail" style="font-size:0.7rem; color:#8b949e;"></div>
+            </div>
+            <div>
+                <h4><i class="fas fa-chart-line"></i> 步态异常实时激活率</h4>
+                <div class="abnormal-list" id="abnormalListContainer">
+                    <!-- 动态填充异常列表 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 伯格平衡量表简易评估 + 报告区域 -->
+    <div class="berg-section">
+        <h3><i class="fas fa-scale-balanced"></i> 伯格平衡量表（BBS）快速评估</h3>
+        <div id="bergSimpleForm">
+            <div class="berg-item"><label>① 由坐到站: </label><select id="bbs1"><option value="4">4-独立站起</option><option value="3">3-用手协助</option><option value="2">2-多次尝试</option><option value="1">1-少量辅助</option><option value="0">0-大量辅助</option></select></div>
+            <div class="berg-item"><label>② 无支撑站立: </label><select id="bbs2"><option value="4">4-安全2分钟</option><option value="3">3-监督下2分钟</option><option value="2">2-30秒</option><option value="1">1-尝试30秒</option><option value="0">0-无法30秒</option></select></div>
+            <div class="berg-item"><label>③ 闭眼站立: </label><select id="bbs3"><option value="4">4-安全10秒</option><option value="3">3-监督下10秒</option><option value="2">2-3秒</option><option value="1">1-无法闭眼</option><option value="0">0-需辅助</option></select></div>
+            <div class="berg-item"><label>④ 单腿站立: </label><select id="bbs4"><option value="4">4->10秒</option><option value="3">3-5~10秒</option><option value="2">2-≥3秒</option><option value="1">1-尝试<3秒</option><option value="0">0-无法尝试</option></select></div>
+            <div class="berg-item"><label>⑤ 串联站立: </label><select id="bbs5"><option value="4">4-独立30秒</option><option value="3">3-小步向前30秒</option><option value="2">2-小步30秒</option><option value="1">1-需帮助15秒</option><option value="0">0-失去平衡</option></select></div>
+            <button class="btn btn-primary" id="calcBbsBtn" style="margin-top: 10px;"><i class="fas fa-calculator"></i> 计算BBS总分</button>
+            <span id="bbsResult" style="margin-left: 16px; font-weight: bold;"></span>
+        </div>
+    </div>
+
+    <div class="report-section" id="diagnosticReportArea">
+        <h3><i class="fas fa-file-medical"></i> 步态诊断报告</h3>
+        <div id="reportContent" class="report-text">
+            <p>等待视频分析数据... 请启动摄像头，系统将自动分析步态异常，点击「生成诊断报告」获取详细康复建议。</p>
+        </div>
+    </div>
+    <footer>基于 MediaPipe Pose (33关键点) | 实时步态分析 | 临床参考用途，请咨询专业医师</footer>
+</div>
+
+<script>
+    // ---------- 全局变量 ----------
+    let poseLandmarker = null;
+    let running = false;
+    let animationId = null;
+    let videoElement = null;
+    let canvasCtx = null;
+    let outputCanvas = null;
+
+    // 滑动窗口存储 (30帧)
+    const WINDOW_SIZE = 30;
+    let abnormalitiesBuffer = {};     // 每个异常存储最近WINDOW_SIZE帧布尔值
+    let frameCounter = 0;
+    let totalFrames = 0;
+    let positiveCounts = {};          // 统计累计阳性帧数 (用于最终报告)
+
+    // 定义15种步态异常 (核心8-10种，但完整展示)
+    const GAIT_ABNORMALITIES = {
+        'scissor_gait': { name: '跨域步态(剪刀步)', color: '#da3633', cause: '痉挛性脑瘫/皮质脊髓束损伤', rehab: '内收肌牵伸、肉毒素注射、功能性电刺激' },
+        'short_stride': { name: '步幅缩短', color: '#f0883e', cause: '帕金森病/疼痛/恐惧跌倒', rehab: '视觉节律提示、大步幅训练(BIG训练)' },
+        'equinus_foot': { name: '马蹄足步态', color: '#bc4c9e', cause: '脑卒中后痉挛/腓总神经麻痹', rehab: '踝背屈牵伸、AFO支具' },
+        'in_toeing': { name: '内八字步态', color: '#58a6ff', cause: '股骨前倾/胫骨内旋', rehab: '旋转矫形鞋、臀外旋肌训练' },
+        'out_toeing': { name: '外八字步态', color: '#3fb950', cause: '髋外旋肌紧张/扁平足', rehab: '髋内旋激活、足弓支撑鞋垫' },
+        'knee_hyperextension': { name: '膝过伸步态', color: '#f97316', cause: '股四头肌无力代偿', rehab: '膝关节本体感觉训练、离心控制' },
+        'knee_flexion': { name: '膝屈曲步态', color: '#a5d6ff', cause: '腘绳肌痉挛/踝背屈过度', rehab: '腘绳肌牵伸、矫形鞋垫提跟' },
+        'trendelenburg': { name: 'Trendelenburg步态', color: '#f2cc60', cause: '臀中肌无力', rehab: '侧卧位髋外展抗阻、单腿站立训练' },
+        'hip_hike': { name: '髋上提步态', color: '#79c0ff', cause: '踝背屈无力/腰方肌代偿', rehab: '腰方肌牵伸、AFO支具、骨盆控制' },
+        'hip_rotation': { name: '髋回旋步态', color: '#d2a8ff', cause: '脑卒中后偏瘫', rehab: '骨盆旋转控制、减重步行训练' },
+        'gluteus_maximus_weakness': { name: '臀大肌无力步态', color: '#ff7b72', cause: '髋伸肌无力', rehab: '桥式运动、臀大肌抗阻训练' },
+        'hip_flexor_tightness': { name: '屈髋肌缩短', color: '#f97583', cause: '长期坐位/髂腰肌挛缩', rehab: '托马斯拉伸、核心稳定训练' }
+    };
+    const AB_KEYS = Object.keys(GAIT_ABNORMALITIES);
+    
+    // 初始化缓冲区
+    function initBuffers() {
+        AB_KEYS.forEach(key => {
+            abnormalitiesBuffer[key] = [];
+            positiveCounts[key] = 0;
+        });
+        totalFrames = 0;
+        frameCounter = 0;
+    }
+
+    // 更新滑动窗口
+    function updateBuffer(key, isActive) {
+        let buf = abnormalitiesBuffer[key];
+        buf.push(isActive);
+        if (buf.length > WINDOW_SIZE) buf.shift();
+        if (isActive) positiveCounts[key] = (positiveCounts[key] || 0) + 1;
+    }
+
+    // 获取平滑激活率 (0-1)
+    function getSmoothRate(key) {
+        let buf = abnormalitiesBuffer[key] || [];
+        if (buf.length === 0) return 0;
+        return buf.reduce((a,b)=> a + (b?1:0), 0) / buf.length;
+    }
+
+    // 更新UI右侧异常列表
+    function updateUI() {
+        const container = document.getElementById('abnormalListContainer');
+        if (!container) return;
+        let html = '';
+        for (let key of AB_KEYS) {
+            const rate = getSmoothRate(key);
+            const percent = Math.round(rate * 100);
+            const info = GAIT_ABNORMALITIES[key];
+            const barColor = info.color;
+            html += `
+                <div class="abnormal-item">
+                    <div class="abnormal-header">
+                        <span><i class="fas fa-footprints"></i> ${info.name}</span>
+                        <span>${percent}%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${percent}%; background: ${barColor};"></div>
+                    </div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+    }
+
+    // 根据骨盆/躯干/膝关节不对称实时评估跌倒风险
+    let lastFallRisk = '低风险';
+    function evaluateFallRiskFromPose(landmarks, imgWidth, imgHeight) {
+        try {
+            // 提取关键点索引 (MediaPipe Pose)
+            const leftHip = landmarks[23]; const rightHip = landmarks[24];
+            const leftShoulder = landmarks[11]; const rightShoulder = landmarks[12];
+            const leftKnee = landmarks[25]; const rightKnee = landmarks[26];
+            const leftAnkle = landmarks[27]; const rightAnkle = landmarks[28];
+            
+            function getPoint(idx) { return { x: landmarks[idx].x * imgWidth, y: landmarks[idx].y * imgHeight }; }
+            const lh = getPoint(23), rh = getPoint(24);
+            const ls = getPoint(11), rs = getPoint(12);
+            const lk = getPoint(25), rk = getPoint(26);
+            const la = getPoint(27), ra = getPoint(28);
+            
+            const hipMid = { x: (lh.x+rh.x)/2, y: (lh.y+rh.y)/2 };
+            const shoulderMid = { x: (ls.x+rs.x)/2, y: (ls.y+rs.y)/2 };
+            const bodyHeight = Math.abs(shoulderMid.y - (la.y+ra.y)/2) + 1;
+            const trunkLean = Math.abs(shoulderMid.x - hipMid.x) / bodyHeight * 100;
+            const pelvisTilt = Math.abs(lh.y - rh.y) / bodyHeight * 100;
+            
+            function angle3(a,b,c) {
+                const ba = { x: a.x-b.x, y: a.y-b.y };
+                const bc = { x: c.x-b.x, y: c.y-b.y };
+                const dot = ba.x*bc.x + ba.y*bc.y;
+                const mag = Math.hypot(ba.x,ba.y) * Math.hypot(bc.x,bc.y);
+                if(mag===0) return 0;
+                let rad = Math.acos(Math.min(1, Math.max(-1, dot/mag)));
+                return rad * 180 / Math.PI;
+            }
+            const lKneeAngle = angle3(lh, lk, la);
+            const rKneeAngle = angle3(rh, rk, ra);
+            const kneeAsym = Math.abs(lKneeAngle - rKneeAngle);
+            let riskScore = 0;
+            let details = [];
+            if(trunkLean > 6) { riskScore++; details.push(`躯干偏斜${trunkLean.toFixed(1)}%`); }
+            if(pelvisTilt > 3.5) { riskScore++; details.push(`骨盆侧倾${pelvisTilt.toFixed(1)}%`); }
+            if(kneeAsym > 22) { riskScore++; details.push(`膝角差${kneeAsym.toFixed(0)}°`); }
+            let level = '低风险', colorDetail = '';
+            if(riskScore >= 2) { level = '高风险'; colorDetail = '立即康复评估，使用辅助器具'; }
+            else if(riskScore >= 1) { level = '中风险'; colorDetail = '加强平衡训练，避免复杂地形'; }
+            else { level = '低风险'; colorDetail = '步态稳定，维持日常活动'; }
+            lastFallRisk = level;
+            document.getElementById('fallRiskLevel').innerHTML = level;
+            document.getElementById('fallRiskDetail').innerHTML = colorDetail;
+            const badge = document.getElementById('fallRiskBadge');
+            if(level === '高风险') badge.style.borderLeftColor = '#da3633';
+            else if(level === '中风险') badge.style.borderLeftColor = '#f0883e';
+            else badge.style.borderLeftColor = '#3fb950';
+            return level;
+        } catch(e) { return lastFallRisk; }
+    }
+
+    // 核心异常检测 (基于关键点)
+    function detectAbnormalities(landmarks, imgWidth, imgHeight) {
+        const results = {};
+        try {
+            const get = (idx) => ({ x: landmarks[idx].x * imgWidth, y: landmarks[idx].y * imgHeight });
+            const leftHip = get(23), rightHip = get(24);
+            const leftAnkle = get(27), rightAnkle = get(28);
+            const leftHeel = get(29), rightHeel = get(30);
+            const leftToe = get(31), rightToe = get(32);
+            const leftKnee = get(25), rightKnee = get(26);
+            const leftShoulder = get(11), rightShoulder = get(12);
+            const hipWidth = Math.hypot(leftHip.x - rightHip.x, leftHip.y - rightHip.y) + 1;
+            const bodyHeight = Math.abs((leftShoulder.y+rightShoulder.y)/2 - (leftAnkle.y+rightAnkle.y)/2) + 1;
+            
+            // 1. 剪刀步: 踝关节间距 < -0.05*髋宽 (左脚x - 右脚x)
+            const ankleGap = leftAnkle.x - rightAnkle.x;
+            results.scissor_gait = (ankleGap / hipWidth) < -0.05;
+            // 2. 步幅缩短: 髋部与肩部水平偏移比
+            const hipCenter = { x: (leftHip.x+rightHip.x)/2, y: (leftHip.y+rightHip.y)/2 };
+            const shoulderCenter = { x: (leftShoulder.x+rightShoulder.x)/2, y: (leftShoulder.y+rightShoulder.y)/2 };
+            const pelvicSwing = Math.abs(hipCenter.x - shoulderCenter.x) / bodyHeight;
+            results.short_stride = pelvicSwing < 0.08;
+            // 3. 马蹄足: 足跟y > 足尖y (跖屈)
+            results.equinus_foot = (leftHeel.y > leftToe.y) || (rightHeel.y > rightToe.y);
+            // 4. 内八字: 足向量与垂直方向夹角>12°
+            function footAngle(toe, heel) {
+                const vec = { x: toe.x - heel.x, y: toe.y - heel.y };
+                const forward = { x: 0, y: 1 };
+                const dot = vec.x*forward.x + vec.y*forward.y;
+                const mag = Math.hypot(vec.x,vec.y);
+                if(mag===0) return 0;
+                let angle = Math.acos(Math.min(1, Math.max(-1, dot/mag))) * 180/Math.PI;
+                const cross = vec.x*forward.y - vec.y*forward.x;
+                return cross > 0 ? angle : -angle;
+            }
+            const lAngle = footAngle(leftToe, leftHeel);
+            const rAngle = footAngle(rightToe, rightHeel);
+            results.in_toeing = (lAngle > 12) || (rAngle > 12);
+            results.out_toeing = (lAngle < -15) || (rAngle < -15);
+            // 膝关节角度计算
+            function angle3P(a,b,c) {
+                const ba = { x: a.x-b.x, y: a.y-b.y };
+                const bc = { x: c.x-b.x, y: c.y-b.y };
+                const dot = ba.x*bc.x + ba.y*bc.y;
+                const mag = Math.hypot(ba.x,ba.y) * Math.hypot(bc.x,bc.y);
+                if(mag===0) return 180;
+                let rad = Math.acos(Math.min(1, Math.max(-1, dot/mag)));
+                return rad * 180 / Math.PI;
+            }
+            const lKnee = angle3P(leftHip, leftKnee, leftAnkle);
+            const rKnee = angle3P(rightHip, rightKnee, rightAnkle);
+            results.knee_hyperextension = (lKnee > 185) || (rKnee > 185);
+            results.knee_flexion = (lKnee < 158) && (rKnee < 158);
+            // 臀中肌无力 Trendelenburg: 骨盆侧倾 > 4%身高
+            const pelvisTilt = Math.abs(leftHip.y - rightHip.y) / bodyHeight;
+            results.trendelenburg = pelvisTilt > 0.045;
+            // 髋上提: 基于骨盆Y位移历史 (简单使用单帧偏移历史均值)
+            if (!window._pelvisYHistory) window._pelvisYHistory = [];
+            const pelvisY = (leftHip.y + rightHip.y)/2;
+            window._pelvisYHistory.push(pelvisY);
+            if(window._pelvisYHistory.length > 20) window._pelvisYHistory.shift();
+            let hike = false;
+            if(window._pelvisYHistory.length >= 10) {
+                const avg = window._pelvisYHistory.slice(0,-5).reduce((a,b)=>a+b,0)/(window._pelvisYHistory.length-5);
+                const diff = (avg - pelvisY) / bodyHeight;
+                hike = diff > 0.035;
+            }
+            results.hip_hike = hike;
+            // 髋回旋 (踝关节横向偏移)
+            const lArc = Math.abs(leftAnkle.x - leftHip.x) - Math.abs(leftKnee.x - leftHip.x);
+            const rArc = Math.abs(rightAnkle.x - rightHip.x) - Math.abs(rightKnee.x - rightHip.x);
+            results.hip_rotation = Math.abs(lArc - rArc) / (hipWidth+1) > 0.2;
+            // 臀大肌无力: 躯干后倾角度
+            const trunkVec = { x: shoulderCenter.x - hipCenter.x, y: shoulderCenter.y - hipCenter.y };
+            const trunkLeanForward = Math.atan2(trunkVec.x, -trunkVec.y) * 180 / Math.PI;
+            results.gluteus_maximus_weakness = Math.abs(trunkLeanForward) > 12;
+            // 屈髋肌缩短: 髋伸展不对称
+            const leftHipExt = angle3P(leftKnee, leftHip, leftShoulder);
+            const rightHipExt = angle3P(rightKnee, rightHip, rightShoulder);
+            results.hip_flexor_tightness = Math.abs(leftHipExt - rightHipExt) > 18;
+            
+            // 补充额外异常默认false
+            for(let k of AB_KEYS) if(results[k] === undefined) results[k] = false;
+        } catch(e) { console.warn(e); for(let k of AB_KEYS) results[k]=false; }
+        return results;
+    }
+
+    // 处理每一帧MediaPipe结果
+    let lastTimestamp = 0;
+    function onResults(results) {
+        if (!running) return;
+        const canvas = outputCanvas;
+        const ctx = canvasCtx;
+        const video = videoElement;
+        if (!ctx || !video) return;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        if (results.landmarks && results.landmarks.length > 0) {
+            const landmarks = results.landmarks[0];
+            // 绘制骨骼点 (简单绘制关键点)
+            const lmArr = landmarks;
+            const w = canvas.width, h = canvas.height;
+            for (let i=0; i<lmArr.length; i++) {
+                const x = lmArr[i].x * w, y = lmArr[i].y * h;
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, 2*Math.PI);
+                ctx.fillStyle = '#58a6ff';
+                ctx.fill();
+            }
+            // 连线 (主要连接)
+            const connections = [[11,12],[12,24],[24,23],[23,11],[23,25],[25,27],[24,26],[26,28],[11,13],[12,14]];
